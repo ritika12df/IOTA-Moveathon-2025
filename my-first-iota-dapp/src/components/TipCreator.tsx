@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNetworkVariable } from '../networkConfig';
 import { useIotaClient, useSignAndExecuteTransaction } from '@iota/dapp-kit';
+import { useIotaWallet } from '../wallet';
 import * as Dialog from "@radix-ui/react-dialog";
 
 const styles = {
@@ -18,24 +19,45 @@ const TipCreator = ({ setTipField }) => {
     const [address, setAddress] = useState("");
     const [amount, setAmount] = useState("");
     const packageId = useNetworkVariable('packageId');
-    const { mutate: signAndExecuteTransaction } = useSignAndExecuteTransaction();
-    const client = useIotaClient();
+    const { mutate: signAndExecuteTransactionBlock } = useSignAndExecuteTransaction();
+    const { getCoinObjects } = useIotaWallet();
 
     const handleTip = async () => {
-        const token = (await client.getCoins(`${packageId}::tipping::TIP_TOKEN`)).find(c => c.value >= parseInt(amount));
-        if (!token) {
-            alert('Insufficient TIP_TOKEN balance');
-            return;
+        try {
+            const tokenType = `${packageId}::tipping::TIPPING`;
+            const coins = await getCoinObjects(tokenType);
+            const coin = coins.find(c => c.balance >= parseInt(amount));
+            if (!coin) {
+                alert('Insufficient TIP_TOKEN balance');
+                return;
+            }
+            const transaction = {
+                kind: 'ProgrammableTransaction',
+                transactions: [
+                    {
+                        MoveCall: {
+                            package: packageId,
+                            module: 'tipping',
+                            function: 'tip',
+                            type_arguments: [],
+                            arguments: [
+                                coin.coinObjectId,
+                                parseInt(amount),
+                                address,
+                            ],
+                        },
+                    },
+                ],
+            };
+            await signAndExecuteTransactionBlock(transaction);
+            setAddress("");
+            setAmount("");
+            setTipField(false);
+            alert('Tip Sent Successfully');
+        } catch (error) {
+            console.error('Transaction failed:', error);
+            alert('Transaction failed. Please check your balance or recipient address.');
         }
-        const transaction = new TransactionBlock();
-        transaction.moveCall({
-            target: `${packageId}::tipping::tip`,
-            arguments: [transaction.object(token.id), transaction.pure.u64(parseInt(amount)), transaction.object(address)],
-        });
-        await signAndExecuteTransaction(transaction);
-        setAddress("");
-        setAmount("");
-        setTipField(false);
     };
 
     return (
