@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNetworkVariable } from '../networkConfig';
-import { useIotaClient, useSignAndExecuteTransaction } from '@iota/dapp-kit';
+import { useSignAndExecuteTransaction } from '@iota/dapp-kit';
+import { useIotaWallet } from '../wallet';
 import * as Dialog from "@radix-ui/react-dialog";
 
 const styles = {
@@ -18,19 +19,42 @@ const BuyTokens = ({ setBuyField }) => {
     const [amount, setAmount] = useState("");
     const packageId = useNetworkVariable('packageId');
     const tippingPlatformId = useNetworkVariable('tippingPlatformId');
-    const { mutate: signAndExecuteTransaction } = useSignAndExecuteTransaction();
-    const client = useIotaClient();
-
+    const { mutate: signAndExecuteTransactionBlock } = useSignAndExecuteTransaction();
+    const { getCoinObjects } = useIotaWallet();
+    
     const handleBuy = async () => {
-        const transaction = new TransactionBlock();
-        const [payment] = transaction.splitCoins(transaction.gas, [parseInt(amount)]);
-        transaction.moveCall({
-            target: `${packageId}::tipping::buy_tokens`,
-            arguments: [transaction.object(tippingPlatformId), payment],
-        });
-        await signAndExecuteTransaction(transaction);
-        setAmount("");
-        setBuyField(false);
+        try {
+            const coins = await getCoinObjects('0x2::iota::IOTA');
+            const coin = coins.find(c => c.balance >= parseInt(amount));
+            if (!coin) {
+                alert('Insufficient IOTA balance');
+                return;
+            }
+            const transaction = {
+                kind: 'ProgrammableTransaction',
+                transactions: [
+                    {
+                        MoveCall: {
+                            package: packageId,
+                            module: 'tipping',
+                            function: 'buy_tokens',
+                            type_arguments: [],
+                            arguments: [
+                                tippingPlatformId,
+                                coin.coinObjectId,
+                            ],
+                        },
+                    },
+                ],
+            };
+            await signAndExecuteTransactionBlock(transaction);
+            setAmount("");
+            setBuyField(false);
+            alert('Transaction Successful');
+        } catch (error) {
+            console.error('Transaction failed:', error);
+            alert('Transaction failed. Please check your balance or try again.');
+        }
     };
 
     return (
