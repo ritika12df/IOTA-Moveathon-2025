@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNetworkVariable } from '../networkConfig';
 import { useIotaClient, useSignAndExecuteTransaction } from '@iota/dapp-kit';
+import { useIotaWallet } from '../wallet';
 import * as Dialog from "@radix-ui/react-dialog";
 
 const styles = {
@@ -18,24 +19,43 @@ const RedeemTokens = ({ setRedeemField }) => {
     const [amount, setAmount] = useState("");
     const packageId = useNetworkVariable('packageId');
     const tippingPlatformId = useNetworkVariable('tippingPlatformId');
-    const { mutate: signAndExecuteTransaction } = useSignAndExecuteTransaction();
-    const client = useIotaClient();
+    const { mutate: signAndExecuteTransactionBlock } = useSignAndExecuteTransaction();
+    const { getCoinObjects } = useIotaWallet();
 
     const handleRedeem = async () => {
-        const token = (await client.getCoins(`${packageId}::tipping::TIP_TOKEN`)).find(c => c.value >= parseInt(amount));
-        if (!token) {
-            alert('Insufficient TIP_TOKEN balance');
-            return;
+        try {
+            const tokenType = `${packageId}::tipping::TIPPING`;
+            const coins = await getCoinObjects(tokenType);
+            const coin = coins.find(c => c.balance >= parseInt(amount));
+            if (!coin) {
+                alert('Insufficient TIP_TOKEN balance');
+                return;
+            }
+            const transaction = {
+                kind: 'ProgrammableTransaction',
+                transactions: [
+                    {
+                        MoveCall: {
+                            package: packageId,
+                            module: 'tipping',
+                            function: 'redeem_tokens',
+                            type_arguments: [],
+                            arguments: [
+                                tippingPlatformId,
+                                coin.coinObjectId,
+                            ],
+                        },
+                    },
+                ],
+            };
+            await signAndExecuteTransactionBlock(transaction);
+            setAmount("");
+            setRedeemField(false);
+            alert('Tokens Redeemed Successfully');
+        } catch (error) {
+            console.error('Transaction failed:', error);
+            alert('Transaction failed. Please check your balance or try again.');
         }
-        const transaction = new TransactionBlock();
-        const [tokensToRedeem] = transaction.splitCoins(transaction.object(token.id), [parseInt(amount)]);
-        transaction.moveCall({
-            target: `${packageId}::tipping::redeem_tokens`,
-            arguments: [transaction.object(tippingPlatformId), tokensToRedeem],
-        });
-        await signAndExecuteTransaction(transaction);
-        setAmount("");
-        setRedeemField(false);
     };
 
     return (
